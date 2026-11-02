@@ -33,7 +33,7 @@ log_debug() {
 # 清理函数
 cleanup_and_exit() {
     # 传入 true 参数以保留监控进程
-    kill_process_by_name "jupiter-swap-api"
+    kill_process_by_name "metis-binary"
     rm -f .jupiter_running
     exit 0
 }
@@ -66,8 +66,8 @@ trap cleanup_and_exit SIGINT SIGTERM SIGHUP
 ulimit -n 100000
 
 # 检查Jupiter API程序是否存在
-if [ ! -f "$SCRIPT_DIR/jupiter-swap-api" ]; then
-    log_error "未找到jupiter-swap-api文件！"
+if [ ! -f "$SCRIPT_DIR/metis-binary" ]; then
+    log_error "未找到metis-binary文件！"
     exit 1
 fi
 
@@ -76,18 +76,36 @@ LOCAL_JUPITER_PORT=${LOCAL_JUPITER_PORT:-18080}
 
 # 生成 Jupiter 启动命令
 generate_jupiter_command() {
-    local cmd="RUST_LOG=info ./jupiter-swap-api"
+    local cmd="RUST_LOG=info ./metis-binary"
     # 从 config.yaml 读取配置
     local rpc_url=$(yq -r '.rpc_url // ""' config.yaml)
     local yellowstone_url=$(yq -r '.yellowstone_grpc_url // ""' config.yaml)
     local yellowstone_token=$(yq -r '.yellowstone_grpc_token // ""' config.yaml)
     local port=$(yq -r '.jupiter_local_port // 18080' config.yaml)
     local market_mode=$(yq -r '.jupiter_market_mode // "remote"' config.yaml)
-    local webserver_thread_count=$(yq -r '.jupiter_webserver // 4' config.yaml)
-    local update_thread_count=$(yq -r '.jupiter_update // 4' config.yaml)
-    local total_thread_count=$(yq -r '.total_thread_count // 16' config.yaml)
+    local rpc_threads=$(yq -r '.rpc_threads // 2' config.yaml)
+    local router_update_threads=$(yq -r '.router_update_threads // 4' config.yaml)
+    local quote_threads=$(yq -r '.quote_threads // 0' config.yaml)
     local host=$(yq -r '.jup_bind_local_host // "0.0.0.0"' config.yaml)
 
+    # 线程参数确保值有效
+    if ! [[ "$rpc_threads" =~ ^[0-9]+$ ]] || [ "$rpc_threads" -lt 1 ]; then
+        log_warning "rpc_threads 配置无效，重置为默认值 2"
+        rpc_threads=2
+    fi
+
+    if ! [[ "$router_update_threads" =~ ^[0-9]+$ ]] || [ "$router_update_threads" -lt 1 ]; then
+        log_warning "router_update_threads 配置无效，重置为默认值 4"
+        router_update_threads=4
+    fi
+
+    if ! [[ "$quote_threads" =~ ^-?[0-9]+$ ]]; then
+        log_warning "quote_threads 配置无效，重置为 0（自动）"
+        quote_threads=0
+    fi
+    if [ "$quote_threads" -lt 0 ]; then
+        quote_threads=0
+    fi
     # 检查必要的配置
     if [ -z "$rpc_url" ]; then
         log_error "RPC URL 未配置"
@@ -96,14 +114,14 @@ generate_jupiter_command() {
 
     # 构建命令
     cmd+=" --rpc-url $rpc_url"
-    cmd+=" --market-cache https://cache.jup.ag/markets?v=4"
-    cmd+=" --market-mode $market_mode"
     cmd+=" --port $port"
     cmd+=" --host $host"
     cmd+=" --allow-circular-arbitrage"
     cmd+=" --enable-new-dexes"
     cmd+=" --expose-quote-and-simulate"
-
+	# 启动健康检查
+	cmd+=" --enable-markets --enable-tokens"
+	cmd+=" --metrics-port 18081"
     # 添加 Yellowstone 配置
     if [ -n "$yellowstone_url" ]; then
         cmd+=" --yellowstone-grpc-endpoint $yellowstone_url"
@@ -112,10 +130,10 @@ generate_jupiter_command() {
         fi
     fi
 
-    # 添加线程配置
-    cmd+=" --total-thread-count $total_thread_count"
-    cmd+=" --webserver-thread-count $webserver_thread_count"
-    cmd+=" --update-thread-count $update_thread_count"
+    # 添加线程配置（新参数）
+    cmd+=" --rpc-threads $rpc_threads"
+    cmd+=" --router-update-threads $router_update_threads"
+    cmd+=" --quote-threads $quote_threads"
 
     # 添加代币过滤
     if [ -f "token-cache.json" ]; then
@@ -148,7 +166,7 @@ start_jupiter_service() {
     sleep 5
     
     # 获取进程 PID
-    local pid=$(pgrep -f "jupiter-swap-api")
+    local pid=$(pgrep -f "metis-binary")
     if [ -n "$pid" ]; then
         echo $pid >jupiter.pid
         log_info "Jupiter 服务启动成功 (进程 PID: $pid)"

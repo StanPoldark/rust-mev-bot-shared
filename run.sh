@@ -10,7 +10,6 @@ readonly COLOR_GREEN='\033[0;32m'
 readonly COLOR_YELLOW='\033[1;33m'
 readonly COLOR_BLUE='\033[0;34m'
 readonly COLOR_RESET='\033[0m'
-
 # 日志函数
 log_info() {
     echo -e "${COLOR_GREEN}[INFO]${COLOR_RESET} $1" >&2
@@ -78,19 +77,19 @@ check_required_files() {
         exit 1
     fi
 
-    if [ ! -f "jupiter-swap-api" ]; then
-        log_error "jupiter-swap-api 文件不存在！"
+    if [ ! -f "metis-binary" ]; then
+        log_error "metis-binary 文件不存在！"
         exit 1
     else
-        log_info "设置 jupiter-swap-api 权限..."
-        chmod +x jupiter-swap-api
+        log_info "设置 metis-binary 权限..."
+        chmod +x metis-binary
     fi
 }
 
 # 设置文件权限
 setup_file_permissions() {
     log_info "设置文件权限..."
-    chmod +x rust-mev-bot upgrade.sh jupiter-swap-api kill-process.sh run-jup.sh mints-query.sh 2>/dev/null || true
+    chmod +x rust-mev-bot upgrade.sh metis-binary kill-process.sh run-jup.sh mints-query.sh 2>/dev/null || true
 }
 
 # 获取重启间隔时间（分钟）
@@ -228,8 +227,6 @@ run_main_loop() {
 
 # 主函数
 main() {
-    # 先行设置资源限制
-    ulimit -n 65535
     # 解析命令行参数
     while [[ $# -gt 0 ]]; do
         case $1 in
